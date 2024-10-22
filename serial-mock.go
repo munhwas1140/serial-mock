@@ -4,27 +4,47 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
-type MockSerialPortMap map[string]*MockSerialPort
+type MockSerialPorts map[string]*MockSerialPort
 
-type MockSerialPort struct {
-	ptys    []*os.File
-	name    string
-	handler func() error
+func New() MockSerialPorts {
+	return MockSerialPorts{}
 }
 
-func New() *MockSerialPortMap {
-	return &MockSerialPortMap{}
-}
+func (ms MockSerialPorts) Add(name string, count int, handler func(*MockSerialPort) error) error {
+	for i := 1; i <= count; i++ {
+		mock := &MockSerialPort{
+			name:    name,
+			handler: handler,
+		}
 
-func Add(name string, count int, fn func() error) {
+		ptm, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
+		if err != nil {
+			return err
+		}
 
-}
+		if err := ptsUnlock(ptm); err != nil {
+			return err
+		}
 
-func (mm *MockSerialPortMap) Run() {
+		sname, err := ptsName(ptm)
+		if err != nil {
+			return err
+		}
 
+		time.Sleep(50 * time.Millisecond)
+		mock.pts, err = os.OpenFile(sname, os.O_RDWR|syscall.O_NOCTTY, 0)
+		if err != nil {
+			return err
+		}
+		mock.ptmFd = os.NewFile(ptm.Fd(), fmt.Sprintf("name_%d", i))
+
+		ms[sname] = mock
+	}
+	return nil
 }
 
 func ptsName(f *os.File) (string, error) {
@@ -44,4 +64,11 @@ func ptsUnlock(f *os.File) error {
 		return err
 	}
 	return nil
+}
+
+type MockSerialPort struct {
+	ptmFd   *os.File
+	pts     *os.File
+	name    string
+	handler func(*MockSerialPort) error
 }
